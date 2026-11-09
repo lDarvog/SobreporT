@@ -1,0 +1,20 @@
+COMO GERAR O APK (sem instalar nada no computador)
+
+1. Crie uma conta gratuita em github.com.
+2. Crie um repositório novo (botão "New") e envie TODOS os arquivos
+   desta pasta para ele, inclusive a pasta oculta .github
+   (arraste e solte na página "uploading an existing file").
+3. Abra a aba "Actions". O build "Gerar APK" começa sozinho
+   (se não, clique em "Run workflow"). Leva uns 5 minutos.
+4. Quando ficar verde, clique no build e baixe "Sobrepor-apk"
+   no fim da página. Dentro do zip está o app-debug.apk.
+5. Envie o APK para quem quiser. No celular da pessoa:
+   abra o arquivo e permita "instalar apps de fontes desconhecidas".
+
+OPÇÃO NO PRÓPRIO COMPUTADOR (precisa de Node 18+, Java 17, Android Studio):
+   npm install
+   npx cap add android
+   (adicione a permissão CAMERA em android/app/src/main/AndroidManifest.xml)
+   npx cap sync android
+   cd android && ./gradlew assembleDebug
+   APK em android/app/build/outputs/apk/debug/app-debug.apk

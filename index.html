@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>Sobrepor</title>
+<style>
+:root{--bg:#f1efeb;--panel:#ffffffee;--ink:#1b1d1f;--mute:#6b7075;--acc:#e8590c;--line:#00000022;box-sizing:border-box}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#101214;--panel:#1b1e21ee;--ink:#f1efeb;--mute:#9aa0a6;--acc:#ff8a3d;--line:#ffffff24}}
+:root[data-theme="dark"]{--bg:#101214;--panel:#1b1e21ee;--ink:#f1efeb;--mute:#9aa0a6;--acc:#ff8a3d;--line:#ffffff24}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden;overscroll-behavior:none}
+#stage{position:fixed;inset:0;touch-action:none;overflow:hidden;background:var(--bg)}
+#cam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none}
+#photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none}
+#ov{position:absolute;left:0;top:0;transform-origin:center center;user-select:none;-webkit-user-drag:none;max-width:none;display:none;will-change:transform}
+#ov.sel{outline:2px dashed var(--acc);outline-offset:2px}
+#empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:32px;text-align:center}
+#empty h1{margin:0;font-size:26px;letter-spacing:-.02em}
+#empty p{margin:0;color:var(--mute);max-width:28ch}
+#msg{position:absolute;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 12px);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px;display:none;backdrop-filter:blur(10px)}
+#bar{position:absolute;left:0;right:0;bottom:0;padding:14px 14px calc(env(safe-area-inset-bottom,0px) + 14px);background:var(--panel);border-top:1px solid var(--line);backdrop-filter:blur(14px);display:flex;flex-direction:column;gap:12px}
+.row{display:flex;align-items:center;gap:10px}
+.row label{font-size:13px;color:var(--mute);min-width:64px}
+.row output{font-variant-numeric:tabular-nums;min-width:40px;text-align:right;font-size:13px}
+input[type=range]{flex:1;accent-color:var(--acc);height:32px;margin:0}
+.btns{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+button,.btn{font:inherit;color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:10px;padding:10px 4px;min-height:44px;cursor:pointer;text-align:center;display:flex;align-items:center;justify-content:center}
+button:active,.btn:active{background:var(--line)}
+button:focus-visible,.btn:focus-visible,input:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+button.main{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600;padding:12px 18px}
+input[type=file]{display:none}
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="cam" playsinline muted autoplay></video>
+  <img id="photo" alt="">
+  <img id="ov" alt="Imagem sobreposta" draggable="false">
+  <div id="empty">
+    <h1>Sobrepor</h1>
+    <p>Escolha uma imagem e posicione-a sobre a câmera.</p>
+    <label class="btn main" for="pick">Escolher imagem</label>
+  </div>
+  <div id="msg" role="status"></div>
+  <div id="bar">
+    <div class="row"><label for="op">Opacidade</label><input id="op" type="range" min="5" max="100" value="50"><output id="opv">50%</output></div>
+    <div class="row"><label for="sc">Tamanho</label><input id="sc" type="range" min="10" max="400" value="100"><output id="scv">100%</output></div>
+    <div class="btns">
+      <label class="btn" for="pick">Imagem</label>
+      <button id="lock">Travar</button>
+      <button id="flip">Espelhar</button>
+      <button id="reset">Centralizar</button>
+      <button id="swap">Trocar câmera</button>
+      <button id="shot">Foto</button>
+      <label class="btn" for="bgpick">Fundo</label>
+      <button id="hide">Ocultar</button>
+    </div>
+  </div>
+</div>
+<input id="pick" type="file" accept="image/*">
+<input id="bgpick" type="file" accept="image/*">
+<script>
+(function(){
+  var $=function(i){return document.getElementById(i)};
+  var stage=$('stage'),cam=$('cam'),photo=$('photo'),ov=$('ov'),bar=$('bar');
+  var st={x:0,y:0,s:1,r:0,flip:1,locked:false,hidden:false};
+  var stream=null,facing='environment';
+
+  function msg(t){var m=$('msg');if(!t){m.style.display='none';return}m.textContent=t;m.style.display='block'}
+  function apply(){
+    ov.style.transform='translate('+st.x+'px,'+st.y+'px) rotate('+st.r+'rad) scale('+(st.s*st.flip)+','+st.s+')';
+    ov.style.opacity=$('op').value/100;
+    ov.style.display=(ov.src&&!st.hidden)?'block':'none';
+    $('scv').textContent=Math.round(st.s*100)+'%';
+    $('sc').value=Math.min(400,Math.max(10,Math.round(st.s*100)));
+  }
+  function center(){
+    var w=ov.naturalWidth||200,h=ov.naturalHeight||200;
+    var fit=Math.min(stage.clientWidth*.8/w,stage.clientHeight*.5/h);
+    ov.style.width=w+'px';ov.style.height=h+'px';
+    st.s=fit;st.r=0;st.flip=1;
+    st.x=(stage.clientWidth-w)/2;st.y=(stage.clientHeight-bar.offsetHeight-h)/2;
+    apply();
+  }
+
+  async function startCam(){
+    msg('');
+    try{
+      if(stream){stream.getTracks().forEach(function(t){t.stop()})}
+      stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:facing},width:{ideal:1920},height:{ideal:1080}},audio:false});
+      cam.srcObject=stream;cam.style.display='block';photo.style.display='none';
+      $('empty').style.display=ov.src?'none':'flex';
+    }catch(e){
+      cam.style.display='none';
+      msg('Não foi possível abrir a câmera. Permita o acesso ou use “Fundo” para escolher uma foto.');
+    }
+  }
+
+  $('pick').addEventListener('change',function(e){
+    var f=e.target.files[0];if(!f)return;
+    if(ov.src&&ov.src.indexOf('blob:')===0)URL.revokeObjectURL(ov.src);
+    ov.onload=function(){center();$('empty').style.display='none';if(!stream)startCam()};
+    ov.src=URL.createObjectURL(f);e.target.value='';
+  });
+  $('bgpick').addEventListener('change',function(e){
+    var f=e.target.files[0];if(!f)return;
+    photo.src=URL.createObjectURL(f);photo.style.display='block';cam.style.display='none';
+    e.target.value='';
+  });
+
+  $('op').addEventListener('input',apply);
+  $('sc').addEventListener('input',function(e){
+    var ns=e.target.value/100,cx=st.x+(ov.offsetWidth)/2,cy=st.y+(ov.offsetHeight)/2;
+    st.s=ns;apply();
+  });
+  $('lock').addEventListener('click',function(){st.locked=!st.locked;this.classList.toggle('on',st.locked);this.textContent=st.locked?'Travada':'Travar';ov.classList.toggle('sel',!st.locked&&!!ov.src)});
+  $('flip').addEventListener('click',function(){st.flip*=-1;apply()});
+  $('reset').addEventListener('click',function(){if(ov.src)center()});
+  $('hide').addEventListener('click',function(){st.hidden=!st.hidden;this.classList.toggle('on',st.hidden);this.textContent=st.hidden?'Mostrar':'Ocultar';apply()});
+  $('swap').addEventListener('click',function(){facing=facing==='environment'?'user':'environment';startCam()});
+
+  $('shot').addEventListener('click',function(){
+    var src=cam.style.display==='block'?cam:(photo.style.display==='block'?photo:null);
+    if(!src){msg('Abra a câmera ou escolha um fundo primeiro.');return}
+    var W=stage.clientWidth,H=stage.clientHeight,k=2;
+    var c=document.createElement('canvas');c.width=W*k;c.height=H*k;
+    var g=c.getContext('2d');g.scale(k,k);
+    var sw=src.videoWidth||src.naturalWidth,sh=src.videoHeight||src.naturalHeight;
+    var r=Math.max(W/sw,H/sh),dw=sw*r,dh=sh*r;
+    g.drawImage(src,(W-dw)/2,(H-dh)/2,dw,dh);
+    if(ov.src&&!st.hidden){
+      g.globalAlpha=$('op').value/100;
+      var w=ov.naturalWidth,h=ov.naturalHeight;
+      g.save();g.translate(st.x+w/2,st.y+h/2);g.rotate(st.r);g.scale(st.s*st.flip,st.s);
+      g.drawImage(ov,-w/2,-h/2,w,h);g.restore();
+    }
+    c.toBlob(function(b){
+      var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='sobrepor.png';
+      document.body.appendChild(a);a.click();a.remove();
+      msg('Foto gerada. Se o download não iniciar, tire uma captura de tela.');setTimeout(function(){msg('')},3500);
+    },'image/png');
+  });
+
+  // Gestos: arrastar (1 dedo), pinça e rotação (2 dedos)
+  var ptrs={},g0=null;
+  function two(){var k=Object.keys(ptrs);if(k.length<2)return null;var a=ptrs[k[0]],b=ptrs[k[1]];
+    return{cx:(a.x+b.x)/2,cy:(a.y+b.y)/2,d:Math.hypot(a.x-b.x,a.y-b.y),a:Math.atan2(b.y-a.y,b.x-a.x)}}
+  stage.addEventListener('pointerdown',function(e){
+    if(bar.contains(e.target)||st.locked||!ov.src||st.hidden)return;
+    stage.setPointerCapture(e.pointerId);
+    ptrs[e.pointerId]={x:e.clientX,y:e.clientY};
+    g0={x:st.x,y:st.y,s:st.s,r:st.r,t:two(),p:{x:e.clientX,y:e.clientY}};
+    if(Object.keys(ptrs).length===2){g0.t=two();g0.x=st.x;g0.y=st.y;g0.s=st.s;g0.r=st.r}
+  });
+  stage.addEventListener('pointermove',function(e){
+    if(!ptrs[e.pointerId]||!g0)return;
+    ptrs[e.pointerId]={x:e.clientX,y:e.clientY};
+    var t=two();
+    if(t&&g0.t){
+      st.s=Math.min(4,Math.max(.1,g0.s*t.d/g0.t.d));
+      st.r=g0.r+(t.a-g0.t.a);
+      st.x=g0.x+(t.cx-g0.t.cx);st.y=g0.y+(t.cy-g0.t.cy);
+    }else if(!t){
+      st.x=g0.x+e.clientX-g0.p.x;st.y=g0.y+e.clientY-g0.p.y;
+    }
+    apply();
+  });
+  function up(e){
+    delete ptrs[e.pointerId];
+    var k=Object.keys(ptrs);
+    if(k.length===1){var p=ptrs[k[0]];g0={x:st.x,y:st.y,s:st.s,r:st.r,t:null,p:{x:p.x,y:p.y}}}
+    else if(!k.length)g0=null;
+  }
+  stage.addEventListener('pointerup',up);stage.addEventListener('pointercancel',up);
+  stage.addEventListener('wheel',function(e){
+    if(st.locked||!ov.src||bar.contains(e.target))return;
+    e.preventDefault();st.s=Math.min(4,Math.max(.1,st.s*(e.deltaY<0?1.06:.94)));apply();
+  },{passive:false});
+
+  ov.classList.add('sel');
+  startCam();
+})();
+</script>
+</body>
+</html>
